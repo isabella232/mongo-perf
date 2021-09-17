@@ -255,22 +255,152 @@ generateTestCase({
     ]
 });
 
-generateTestCase({name: "Group.All", pipeline: [{$group: {_id: "constant"}}]});
+let docs_count = 100000;
+let quote_text = "There are few people whom I really love, and still fewer of whom I think well. \
+               The more I see of the world, the more am I dissatisfied with it; and every day \
+               confirms my belief of the inconsistency of all human characters, and of the little \
+               dependence that can be placed on the appearance of merit or sense.";
+let quote = {author: "Jane Austen", work: "Pride and Prejudice", quote: quote_text};
+let generateDocForGroupingTest = function basicGroupDocGenerator(i) {
+    return {
+        _id: i, 
+        _idMod10: i % 10,
+        x: Random.randInt(20),
+        y: Random.randInt(50),
+        quotes: [quote, quote, quote, quote, quote, quote, quote, quote], // inactive payload
+    };
+};
+
+generateTestCase({
+    name: "Group.Baseline",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$match: {}}]
+});
+
+generateTestCase({
+    name: "Group.All",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "constant"}}]
+});
 
 generateTestCase({
     name: "Group.TenGroups",
-    docGenerator: function basicGroupDocGenerator(i) {
-        return {_id: i, _idMod10: i % 10};
-    },
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
     pipeline: [{$group: {_id: "$_idMod10"}}]
+});
+
+//
+// Benchmark each accumulator separately.
+//
+generateTestCase({
+    name: "Group.TenGroupsWithFirst",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", first: {$first: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithLast",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", last: {$last: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithMin",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", min: {$min: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithMax",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", min: {$max: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithConstSum",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", sum: {$sum: 1}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithSum",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", sum: {$sum: "$x"}}}]
 });
 
 generateTestCase({
     name: "Group.TenGroupsWithAvg",
-    docGenerator: function basicGroupDocGenerator(i) {
-        return {_id: i, _idMod10: i % 10};
-    },
-    pipeline: [{$group: {_id: "$_idMod10", avg: {$avg: "$_id"}}}]
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", avg: {$avg: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithPush",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", push: {$push: "$x"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithAddToSet",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", addToSet: {$addToSet: "$x"}}}]
+});
+
+//
+// Benchmark combinations of accumulators.
+//
+generateTestCase({
+    name: "Group.TenGroupsWithTwoSums",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [{$group: {_id: "$_idMod10", sum1: {$sum: "$x"}, sum2: {$sum: "$y"}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithThreeSums",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {$group: {_id: "$_idMod10", sum1: {$sum: "$x"}, sum2: {$sum: "$y"}, sum3: {$sum: 1}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithTwoMins",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {$group: {_id: "$_idMod10", 
+        min1: {$min: "$x"}, 
+        min2: {$min: "$y"},
+        }
+    }]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithMultipleAccsOnSameField",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {$group: {_id: "$_idMod10", 
+        min: {$min: "$x"}, 
+        max: {$max: "$x"},
+        first: {$first: "$x"},
+        last: {$max: "$x"},
+        avg: {$avg: "$x"},
+        }
+    }]
 });
 
 /**
