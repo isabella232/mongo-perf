@@ -264,9 +264,23 @@ let quote = {author: "Jane Austen", work: "Pride and Prejudice", quote: quote_te
 let generateDocForGroupingTest = function basicGroupDocGenerator(i) {
     return {
         _id: i, 
-        _idMod10: i % 10,
-        x: Random.randInt(20),
+        _idMod100: i % 10,
+        x: {a: Random.randInt(20)},
         y: Random.randInt(50),
+        // u: 1,
+        // v: 1,
+        // xx: 1,
+        // yy: 1,
+        // uu: 1,
+        // vv: 1,
+        // a: 1,
+        // b: 1,
+        // c: 1,
+        // d:1,
+        // aa: 1,
+        // bb: 1,
+        // cc: 1,
+        // dd: 1,
         quotes: [quote, quote, quote, quote, quote, quote, quote, quote], // inactive payload
     };
 };
@@ -275,7 +289,7 @@ generateTestCase({
     name: "Group.Baseline",
     docGenerator: generateDocForGroupingTest,
     nDocs: docs_count,
-    pipeline: [{$match: {}}]
+    pipeline: [{$match: {"x.a":42}}]
 });
 
 generateTestCase({
@@ -334,7 +348,17 @@ generateTestCase({
     name: "Group.TenGroupsWithSum",
     docGenerator: generateDocForGroupingTest,
     nDocs: docs_count,
-    pipeline: [{$group: {_id: "$_idMod10", sum: {$sum: "$x"}}}]
+    pipeline: [{$group: {_id: "$_idMod10", sum: {$sum: "$x.a"}}}]
+});
+
+generateTestCase({
+    name: "Group.TwoGroupStages",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {$group: {_id: "$_idMod10", sum: {$sum: "$x.a"}}},
+        {$group: {_id: "$sum"}},
+    ]
 });
 
 generateTestCase({
@@ -374,6 +398,49 @@ generateTestCase({
     nDocs: docs_count,
     pipeline: [
         {$group: {_id: "$_idMod10", sum1: {$sum: "$x"}, sum2: {$sum: "$y"}, sum3: {$sum: 1}}}]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithManyConstSums",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {
+            $group: {
+                _id: "$_idMod10", sum1: {$sum: "$x"}, sum2: {$sum: "$y"}, 
+                sum3: {$sum: 1}, sum4: {$sum: 1}
+                , sum5: {$sum: 1}, sum6: {$sum: 1}, sum7: {$sum: 1}, sum8: {$sum: 1}
+                , sum9: {$sum: 1}, sum10: {$sum: 1}, sum11: {$sum: 1}, sum12: {$sum: 1}, sum13: {$sum: 1}, sum14: {$sum: 1}, sum15: {$sum: 1}, sum16: {$sum: 1}
+                , sum17: {$sum: 1}, sum18: {$sum: 1}, sum19: {$sum: 1}, sum20: {$sum: 1}, sum21: {$sum: 1}, sum22: {$sum: 1}, sum23: {$sum: 1}, sum24: {$sum: 1}
+                , sum25: {$sum: 1}, sum26: {$sum: 1}, sum27: {$sum: 1}, sum28: {$sum: 1}, sum29: {$sum: 1}, sum30: {$sum: 1}, sum31: {$sum: 1}, sum32: {$sum: 1}
+            }
+        }
+    ]
+});
+
+generateTestCase({
+    name: "Group.TenGroupsWithManySums",
+    docGenerator: generateDocForGroupingTest,
+    nDocs: docs_count,
+    pipeline: [
+        {
+            $group: {
+                _id: "$_idMod10"
+                , sum1: {$sum: "$x"}, sum2: {$sum: "$y"}, sum3: {$sum: "$u"}, sum4: {$sum: "$v"}
+                //, sum1: {$sum: "$x"}, sum2: {$sum: "$x"}, sum3: {$sum: "$x"}, sum4: {$sum: "$x"}
+                , sum5: {$sum: "$xx"}, sum6: {$sum: "$yy"}, sum7: {$sum: "$uu"}, sum8: {$sum: "$vv"}
+                //, sum5: {$sum: "$x"}, sum6: {$sum: "$y"}, sum7: {$sum: "$u"}, sum8: {$sum: "$v"}
+                //, sum5: {$sum: "$x"}, sum6: {$sum: "$x"}, sum7: {$sum: "$x"}, sum8: {$sum: "$x"}
+                , sum9: {$sum: "$a"}, sum10: {$sum: "$b"}, sum11: {$sum: "$c"}, sum12: {$sum: "$d"}, sum13: {$sum: "$aa"}, sum14: {$sum: "$bb"}, sum15: {$sum: "$cc"}, sum16: {$sum: "$dd"}
+                //, sum9: {$sum: "$x"}, sum10: {$sum: "$y"}, sum11: {$sum: "$u"}, sum12: {$sum: "$v"}, sum13: {$sum: "$xx"}, sum14: {$sum: "$yy"}, sum15: {$sum: "$uu"}, sum16: {$sum: "$vv"}
+                //, sum9: {$sum: "$x"}, sum10: {$sum: "$x"}, sum11: {$sum: "$x"}, sum12: {$sum: "$x"}, sum13: {$sum: "$x"}, sum14: {$sum: "$x"}, sum15: {$sum: "$x"}, sum16: {$sum: "$x"}
+                //, sum17: {$sum: "$x"}, sum18: {$sum: "$y"}, sum19: {$sum: "$u"}, sum20: {$sum: "$v"}, sum21: {$sum: "$xx"}, sum22: {$sum: "$yy"}, sum23: {$sum: "$uu"}, sum24: {$sum: "$vv"}
+                //, sum25: {$sum: "$x"}, sum26: {$sum: "$y"}, sum27: {$sum: "$u"}, sum28: {$sum: "$v"}, sum29: {$sum: "$xx"}, sum30: {$sum: "$yy"}, sum31: {$sum: "$uu"}, sum32: {$sum: "$vv"}
+                //, sum17: {$sum: "$x"}, sum18: {$sum: "$x"}, sum19: {$sum: "$x"}, sum20: {$sum: "$x"}, sum21: {$sum: "$x"}, sum22: {$sum: "$x"}, sum23: {$sum: "$x"}, sum24: {$sum: "$x"}
+                //, sum25: {$sum: "$x"}, sum26: {$sum: "$x"}, sum27: {$sum: "$x"}, sum28: {$sum: "$x"}, sum29: {$sum: "$x"}, sum30: {$sum: "$x"}, sum31: {$sum: "$x"}, sum32: {$sum: "$x"}
+            }
+        }
+    ]
 });
 
 generateTestCase({

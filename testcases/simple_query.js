@@ -1,8 +1,8 @@
-if (typeof(tests) !== "object") {
+if (typeof (tests) !== "object") {
     tests = [];
 }
 
-(function() {
+(function () {
     "use strict";
 
     Random.setRandomSeed(258);
@@ -18,7 +18,7 @@ if (typeof(tests) !== "object") {
      * @param {Object} collectionOptions - Options to use for view/collection creation.
      */
     function collectionPopulator(isView, nDocs, indexes, docGenerator, collectionOptions) {
-        return function(collectionOrView) {
+        return function (collectionOrView) {
             Random.setRandomSeed(258);
 
             collectionOrView.drop();
@@ -33,14 +33,14 @@ if (typeof(tests) !== "object") {
                 collection = db.getCollection(collectionName);
                 collection.drop();
 
-                var viewCreationSpec = {create: viewName, viewOn: collectionName};
+                var viewCreationSpec = { create: viewName, viewOn: collectionName };
                 assert.commandWorked(
                     db.runCommand(Object.extend(viewCreationSpec, collectionOptions)));
             } else {
                 collection = collectionOrView;
             }
 
-            var collectionCreationSpec = {create: collection.getName()};
+            var collectionCreationSpec = { create: collection.getName() };
             assert.commandWorked(
                 db.runCommand(Object.extend(collectionCreationSpec, collectionOptions)));
             var bulkOp = collection.initializeUnorderedBulkOp();
@@ -48,7 +48,7 @@ if (typeof(tests) !== "object") {
                 bulkOp.insert(docGenerator(i));
             }
             bulkOp.execute();
-            indexes.forEach(function(indexSpec) {
+            indexes.forEach(function (indexSpec) {
                 assert.commandWorked(collection.createIndex(indexSpec));
             });
         };
@@ -71,26 +71,26 @@ if (typeof(tests) !== "object") {
         var pipeline = newOp.command.pipeline;
 
         if (op.query) {
-            pipeline.push({$match: op.query});
+            pipeline.push({ $match: op.query });
         }
         if (op.sort) {
-            pipeline.push({$sort: op.sort});
+            pipeline.push({ $sort: op.sort });
         }
 
         if (op.skip) {
-            pipeline.push({$skip: op.skip});
+            pipeline.push({ $skip: op.skip });
         }
 
         if (op.limit) {
-            pipeline.push({$limit: op.limit});
+            pipeline.push({ $limit: op.limit });
         } else if (op.op === "findOne") {
-            pipeline.push({$limit: 1});
+            pipeline.push({ $limit: 1 });
         }
 
         // Confusingly, benchRun uses the name "filter" to refer to the projection (*not* the query
         // predicate).
         if (op.filter) {
-            pipeline.push({$project: op.filter});
+            pipeline.push({ $project: op.filter });
         }
 
         return newOp;
@@ -129,7 +129,7 @@ if (typeof(tests) !== "object") {
             name: "Queries." + options.name,
             pre: collectionPopulator(
                 !isView, options.nDocs, indexes, options.docs, options.collectionOptions),
-            post: function(collection) {
+            post: function (collection) {
                 collection.drop();
             },
             ops: [options.op]
@@ -141,7 +141,7 @@ if (typeof(tests) !== "object") {
                 name: "Queries.IdentityView." + options.name,
                 pre: collectionPopulator(
                     isView, options.nDocs, indexes, options.docs, options.collectionOptions),
-                post: function(view) {
+                post: function (view) {
                     view.drop();
                     var collName = view.getName() + "_BackingCollection";
                     view.getDB().getCollection(collName).drop();
@@ -156,12 +156,288 @@ if (typeof(tests) !== "object") {
             name: "Aggregation." + options.name,
             pre: collectionPopulator(
                 !isView, options.nDocs, indexes, options.docs, options.collectionOptions),
-            post: function(collection) {
+            post: function (collection) {
                 collection.drop();
             },
             ops: [rewriteQueryOpAsAgg(options.op)]
         });
     }
+
+    const smallCollectionSize = 100;
+    const largeCollectionSize = 100000;
+
+    // The intent of testing with small documents is to have small overhead associated with parsing
+    // and copying them while having enough fields to run queries with different characteristics
+    // such as selectivity, complex expressions, sub-fields and arrays access, etc.
+    const smallDoc = function (i) {
+        return {
+            _id: i,
+            a: Random.randInt(10),
+            b: Random.randInt(1000),
+            c: Random.rand() * 100,
+            d: i % 10000,
+            e: {
+                x: Random.randInt(10),
+                y: Random.randInt(1000),
+                z: { u: Random.randInt(100), v: Random.randInt(100) },
+            },
+            f: [Random.randInt(10), Random.randInt(10), Random.randInt(10)],
+        };
+    }
+
+    // The intent of testing with large documents is to make it clear when there is overhead 
+    // associated with parsing and copying them.
+    const quotes = [
+        "Silly things do cease to be silly if they are done by sensible people in an impudent way.",
+        "I may have lost my heart, but not my self-control.",
+        "Success supposes endeavour.",
+        "One half of the world cannot understand the pleasures of the other.",
+        "It is not every man’s fate to marry the woman who loves him best"
+    ];
+    const largeDoc = function (i) {
+        return {
+            _id: i,
+            a: Random.randInt(10),
+            b: Random.randInt(1000),
+            c: Random.rand() * 100 + 1, // no zeros in this field
+            d: i % 10000,
+            e: {
+                x: Random.randInt(10),
+                y: Random.randInt(1000),
+                z: { u: Random.randInt(100), v: Random.randInt(100) },
+            },
+            f: [Random.randInt(10), Random.randInt(10), Random.randInt(10)],
+
+            // Fields the queries won't be accessing but might need to copy/scan over.
+            p1: [quotes, quotes, quotes, quotes, quotes],
+            p2: { author: " Jane Austen", work: "Emma", quotes: quotes },
+            p3: { a: quotes[0] + i.toString(), b: quotes[2] + (i % 10).toString(), c: quotes[4] },
+
+            // Fields towards the end of the object some of the tests will be using.
+            aa: Random.randInt(10),
+            bb: Random.randInt(1000),
+            cc: Random.rand() * 100 + 1,
+            dd: i % 10000,
+            ee: {
+                x: Random.randInt(10),
+                y: Random.randInt(1000),
+                z: { u: Random.randInt(100), v: Random.randInt(100) },
+            },
+            ff: [Random.randInt(10), Random.randInt(10), Random.randInt(10)],
+        };
+    }
+
+    /**
+     * Tests: point-query on a top-level field with full collection scan.
+     */
+    addTestCase({
+        name: "PointQuery_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { a: 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuery_CollScan_SL",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { a: 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuery_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { a: 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuery_CollScan_LL",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { a: 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuery_CollScan_LLR",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { aa: 7 } } // selectivity: ~10% of the records
+    });
+
+    /**
+     * Tests: point-query on a sub-field with full collection scan.
+     */
+    addTestCase({
+        name: "PointQuerySubField_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { "e.x": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuerySubField_CollScan_SL",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "e.x": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuerySubField_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { "e.x": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuerySubField_CollScan_LL",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "e.x": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQuerySubField_CollScan_LLR",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "ee.x": 7 } } // selectivity: ~10% of the records
+    });
+
+    /**
+     * Tests: point-query on an array field with full collection scan.
+     */
+    addTestCase({
+        name: "PointQueryArray_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { "f": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQueryArray_CollScan_SL",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "f": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQueryArray_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: { "f": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQueryArray_CollScan_LL",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "f": 7 } } // selectivity: ~10% of the records
+    });
+    addTestCase({
+        name: "PointQueryArray_CollScan_LLR",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: { "ff": 7 } } // selectivity: ~10% of the records
+    });
+
+    /**
+     * Tests: query with a complex expression on top-level fields with full collection scan.
+     */
+    let queryExpr = {
+        $expr:
+        {
+          $or:
+          [
+            {$and: [{$eq: ["$a", 8]}, {$eq: ["$b", 70]}]},
+            {$and: [{$eq: ["$c", 42.5]}, {$eq: ["$d", 17]}]},
+            {$eq: ["$a", 9]}, {$eq: ["$b", 200]}, {$eq: ["$c", 51.2]}, {$eq: ["$d", 400]},
+          ]
+        }
+    };
+    addTestCase({
+        name: "ComplexExpressionQuery_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: queryExpr }
+    });
+    addTestCase({
+        name: "ComplexExpressionQuery_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: queryExpr }
+    });
+    addTestCase({
+        name: "ComplexExpressionQuery_CollScan_LL",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: queryExpr }
+    });
+
+    /**
+     * Tests: query with a complex expression on a single top-level field with full collection scan.
+     */
+    let queryExprSingleField = {
+        $expr:
+        {
+            $or:
+            [
+            {$and: [{$gt: ["$b", 69]}, {$lt: ["$b", 71]}]},
+            {$and: [{$gt: ["$b", 117]}, {$lt: ["$b", 118.5]}]},
+            {$eq: ["$b", 200]}, {$eq: ["$b", 300]}, {$eq: ["$b", 400]}, {$eq: ["$b", 500]},
+            ]
+        }
+    };
+    addTestCase({
+        name: "ComplexExpressionSingleFieldQuery_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: queryExprSingleField }
+    });
+    addTestCase({
+        name: "ComplexExpressionSingleFieldQuery_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: queryExprSingleField }
+    });
+    addTestCase({
+        name: "ComplexExpressionSingleFieldQuery_CollScan_LL",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: largeDoc,
+        op: { op: "find", query: queryExprSingleField }
+    });
+
+    /**
+     * Tests: project with arithmetic expressions.
+     */
+    let projectWithArithExpressions = {
+        an: {$abs: "$a"}, bn: {$mod: ["$b", 17]}, cn: {$floor: "$c"},
+        dl: {$ln: {$add: [{$abs: "$d"}, 1]}},
+        ab: {$add: ["$a", "$b"]}, cd: {$divide: ["$d", "$c"]},
+    };
+    addTestCase({
+        name: "ProjectWithArithExpressions_CollScan_SS",
+        tags: ["regression"],
+        nDocs: smallCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: {}, filter: projectWithArithExpressions }
+    });
+    addTestCase({
+        name: "ProjectWithArithExpressions_CollScan_LS",
+        tags: ["regression"],
+        nDocs: largeCollectionSize,
+        docs: smallDoc,
+        op: { op: "find", query: {}, filter: projectWithArithExpressions }
+    });
 
     /**
      * Setup: Create a collection of documents containing only an ObjectId _id field.
@@ -174,10 +450,10 @@ if (typeof(tests) !== "object") {
         // This generates documents to be inserted into the collection, resulting in 100 documents
         // with only an _id field.
         nDocs: 100,
-        docs: function(i) {
+        docs: function (i) {
             return {};
         },
-        op: {op: "find", query: {}}
+        op: { op: "find", query: {} }
     });
 
     /**
@@ -190,10 +466,10 @@ if (typeof(tests) !== "object") {
         name: "NoMatch",
         tags: ["regression"],
         nDocs: 100,
-        docs: function(i) {
+        docs: function (i) {
             return {};
         },
-        op: {op: "find", query: {nonexistent: 5}}
+        op: { op: "find", query: { nonexistent: 5 } }
     });
 
     /**
@@ -206,10 +482,10 @@ if (typeof(tests) !== "object") {
         name: "IntIdFindOne",
         tags: ["regression"],
         nDocs: 4800,
-        docs: function(i) {
-            return {_id: i};
+        docs: function (i) {
+            return { _id: i };
         },
-        op: {op: "findOne", query: {_id: {"#RAND_INT_PLUS_THREAD": [0, 100]}}}
+        op: { op: "findOne", query: { _id: { "#RAND_INT_PLUS_THREAD": [0, 100] } } }
     });
 
     /**
@@ -222,11 +498,11 @@ if (typeof(tests) !== "object") {
         name: "IntNonIdFindOne",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {_id: i};
+        docs: function (i) {
+            return { _id: i };
         },
-        indexes: [{x: 1}],
-        op: {op: "findOne", query: {_id: {"#RAND_INT_PLUS_THREAD": [0, 100]}}}
+        indexes: [{ x: 1 }],
+        op: { op: "findOne", query: { _id: { "#RAND_INT_PLUS_THREAD": [0, 100] } } }
     });
 
     /**
@@ -239,10 +515,10 @@ if (typeof(tests) !== "object") {
         name: "IntIDRange",
         tags: ["regression"],
         nDocs: 4800,
-        docs: function(i) {
-            return {_id: i};
+        docs: function (i) {
+            return { _id: i };
         },
-        op: {op: "find", query: {_id: {$gt: 50, $lt: 100}}}
+        op: { op: "find", query: { _id: { $gt: 50, $lt: 100 } } }
     });
 
     /**
@@ -255,11 +531,11 @@ if (typeof(tests) !== "object") {
         name: "IntNonIDRange",
         tags: ["indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {_id: i};
+        docs: function (i) {
+            return { _id: i };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {x: {$gt: 50, $lt: 100}}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: { x: { $gt: 50, $lt: 100 } } }
     });
 
     /**
@@ -272,11 +548,11 @@ if (typeof(tests) !== "object") {
         name: "RegexPrefixFindOne",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {x: i.toString()};
+        docs: function (i) {
+            return { x: i.toString() };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {x: /^2400/}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: { x: /^2400/ } }
     });
 
     /**
@@ -289,15 +565,15 @@ if (typeof(tests) !== "object") {
         name: "TwoInts",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {x: i, y: 2 * i};
+        docs: function (i) {
+            return { x: i, y: 2 * i };
         },
-        indexes: [{x: 1}, {y: 1}],
+        indexes: [{ x: 1 }, { y: 1 }],
         op: {
             op: "find",
             query: {
-                x: {"#SEQ_INT": {seq_id: 0, start: 0, step: 1, mod: 4800}},
-                y: {"#SEQ_INT": {seq_id: 1, start: 0, step: 2, mod: 9600}}
+                x: { "#SEQ_INT": { seq_id: 0, start: 0, step: 1, mod: 4800 } },
+                y: { "#SEQ_INT": { seq_id: 1, start: 0, step: 2, mod: 9600 } }
             }
         }
     });
@@ -321,12 +597,12 @@ if (typeof(tests) !== "object") {
             }
         },
         nDocs: 4800,
-        docs: function(i) {
+        docs: function (i) {
             var j = i + (1 * 1000 * 1000 * 1000);
-            return {x: j.toString()};
+            return { x: j.toString() };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {x: {$gte: "1000002400", $lt: "1000002404"}}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: { x: { $gte: "1000002400", $lt: "1000002404" } } }
     });
 
     /**
@@ -342,12 +618,12 @@ if (typeof(tests) !== "object") {
         name: "StringRangeWithSimpleCollation",
         tags: ["indexed", "collation"],
         nDocs: 4800,
-        docs: function(i) {
+        docs: function (i) {
             var j = i + (1 * 1000 * 1000 * 1000);
-            return {x: j.toString()};
+            return { x: j.toString() };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {x: {$gte: "1000002400", $lt: "1000002404"}}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: { x: { $gte: "1000002400", $lt: "1000002404" } } }
     });
 
     /**
@@ -374,13 +650,13 @@ if (typeof(tests) !== "object") {
             }
         },
         nDocs: 10,
-        docs: function(i) {
-            return {x: i.toString()};
+        docs: function (i) {
+            return { x: i.toString() };
         },
         op: {
             op: "find",
-            query: {x: {$in: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}},
-            sort: {x: 1}
+            query: { x: { $in: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] } },
+            sort: { x: 1 }
         }
     });
 
@@ -404,13 +680,13 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 10,
-        docs: function(i) {
-            return {x: i.toString()};
+        docs: function (i) {
+            return { x: i.toString() };
         },
         op: {
             op: "find",
-            query: {x: {$in: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}},
-            sort: {x: 1}
+            query: { x: { $in: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] } },
+            sort: { x: 1 }
         }
     });
 
@@ -432,7 +708,7 @@ if (typeof(tests) !== "object") {
      * Adds two test cases for a $in query: One a small collection with a $in filter that
      * includes every document, and another on a larger collection with a selective $in filter.
      */
-    function addInTestCases({name, largeInArray}) {
+    function addInTestCases({ name, largeInArray }) {
         // Setup: Create a collection and insert a small number of documents with a random even
         // integer field x in the range [0, nLargeArrayElements * 2).
 
@@ -444,12 +720,12 @@ if (typeof(tests) !== "object") {
             name: name,
             tags: ["regression"],
             nDocs: 10,
-            docs: function(i) {
-                return {x: 2 * Random.randInt(largeInArray.length)};
+            docs: function (i) {
+                return { x: 2 * Random.randInt(largeInArray.length) };
             },
             op: {
                 op: "find",
-                query: {x: {$in: largeInArray}}
+                query: { x: { $in: largeInArray } }
             }
         });
 
@@ -459,12 +735,12 @@ if (typeof(tests) !== "object") {
             name: name + "BigCollection",
             tags: ["regression"],
             nDocs: 10000,
-            docs: function(i) {
-                return {x: 2 * Random.randInt(largeInArray.length * 10)};
+            docs: function (i) {
+                return { x: 2 * Random.randInt(largeInArray.length * 10) };
             },
             op: {
                 op: "find",
-                query: {x: {$in: largeInArray}}
+                query: { x: { $in: largeInArray } }
             }
         });
     };
@@ -515,12 +791,12 @@ if (typeof(tests) !== "object") {
         name: "UnindexedLargeInNonMatching",
         tags: ["regression"],
         nDocs: 10,
-        docs: function(i) {
-            return {x: 2 * Random.randInt(1000) + 1};
+        docs: function (i) {
+            return { x: 2 * Random.randInt(1000) + 1 };
         },
         op: {
             op: "find",
-            query: {x: {$in: largeArraySorted}}
+            query: { x: { $in: largeArraySorted } }
         }
     });
 
@@ -531,12 +807,12 @@ if (typeof(tests) !== "object") {
         name: "UnindexedLargeInUnsortedNonMatching",
         tags: ["regression"],
         nDocs: 10,
-        docs: function(i) {
-            return {x: 2 * Random.randInt(1000) + 1};
+        docs: function (i) {
+            return { x: 2 * Random.randInt(1000) + 1 };
         },
         op: {
             op: "find",
-            query: {x: {$in: largeArrayRandom}}
+            query: { x: { $in: largeArrayRandom } }
         }
     });
 
@@ -553,15 +829,15 @@ if (typeof(tests) !== "object") {
         name: "IntNonIdFindOneProjectionCovered",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {x: i};
+        docs: function (i) {
+            return { x: i };
         },
-        indexes: [{x: 1}],
+        indexes: [{ x: 1 }],
         op: {
             op: "find",
-            query: {x: {"#RAND_INT_PLUS_THREAD": [0, 100]}},
+            query: { x: { "#RAND_INT_PLUS_THREAD": [0, 100] } },
             limit: 1,
-            filter: {x: 1, _id: 0}
+            filter: { x: 1, _id: 0 }
         }
     });
 
@@ -575,15 +851,15 @@ if (typeof(tests) !== "object") {
         name: "IntNonIdFindOneProjection",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {x: i};
+        docs: function (i) {
+            return { x: i };
         },
-        indexes: [{x: 1}],
+        indexes: [{ x: 1 }],
         op: {
             op: "find",
-            query: {x: {"#RAND_INT_PLUS_THREAD": [0, 100]}},
+            query: { x: { "#RAND_INT_PLUS_THREAD": [0, 100] } },
             limit: 1,
-            filter: {x: 1, _id: 0}
+            filter: { x: 1, _id: 0 }
         }
     });
 
@@ -597,11 +873,11 @@ if (typeof(tests) !== "object") {
         name: "IntNonIdFindProjectionCovered",
         tags: ["indexed", "regression"],
         nDocs: 100,
-        docs: function(i) {
-            return {x: i};
+        docs: function (i) {
+            return { x: i };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {x: {$gte: 0}}, filter: {x: 1, _id: 0}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: { x: { $gte: 0 } }, filter: { x: 1, _id: 0 } }
     });
 
     /**
@@ -614,11 +890,11 @@ if (typeof(tests) !== "object") {
         name: "FindProjection",
         tags: ["regression", "indexed"],
         nDocs: 100,
-        docs: function(i) {
-            return {x: i};
+        docs: function (i) {
+            return { x: i };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {}, filter: {x: 1}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: {}, filter: { x: 1 } }
     });
 
     /**
@@ -631,7 +907,7 @@ if (typeof(tests) !== "object") {
         name: "FindWideDocProjection",
         tags: ["regression"],
         nDocs: 100,
-        docs: function(i) {
+        docs: function (i) {
             return {
                 a: i,
                 b: i,
@@ -661,7 +937,7 @@ if (typeof(tests) !== "object") {
                 z: 1
             };
         },
-        op: {op: "find", query: {}, filter: {x: 1}}
+        op: { op: "find", query: {}, filter: { x: 1 } }
     });
 
     /**
@@ -676,14 +952,14 @@ if (typeof(tests) !== "object") {
         name: "FindProjectionThreeFieldsCovered",
         tags: ["core", "indexed"],
         nDocs: 4800,
-        docs: function(i) {
-            return {x: i, y: i, z: i};
+        docs: function (i) {
+            return { x: i, y: i, z: i };
         },
-        indexes: [{x: 1, y: 1, z: 1}],
+        indexes: [{ x: 1, y: 1, z: 1 }],
         op: {
             op: "find",
-            query: {x: {"#RAND_INT_PLUS_THREAD": [0, 100]}},
-            filter: {x: 1, y: 1, z: 1, _id: 0}
+            query: { x: { "#RAND_INT_PLUS_THREAD": [0, 100] } },
+            filter: { x: 1, y: 1, z: 1, _id: 0 }
         }
     });
 
@@ -696,10 +972,10 @@ if (typeof(tests) !== "object") {
         name: "FindProjectionThreeFields",
         tags: ["regression"],
         nDocs: 100,
-        docs: function(i) {
-            return {x: i, y: i, z: i};
+        docs: function (i) {
+            return { x: i, y: i, z: i };
         },
-        op: {op: "find", query: {}, filter: {x: 1, y: 1, z: 1, _id: 0}}
+        op: { op: "find", query: {}, filter: { x: 1, y: 1, z: 1, _id: 0 } }
     });
 
     /**
@@ -712,10 +988,10 @@ if (typeof(tests) !== "object") {
         name: "FindProjectionDottedField",
         tags: ["regression"],
         nDocs: 100,
-        docs: function(i) {
-            return {x: {y: i}};
+        docs: function (i) {
+            return { x: { y: i } };
         },
-        op: {op: "find", query: {}, filter: {"x.y": 1, _id: 0}}
+        op: { op: "find", query: {}, filter: { "x.y": 1, _id: 0 } }
     });
 
     /**
@@ -728,14 +1004,14 @@ if (typeof(tests) !== "object") {
         name: "FindProjectionDottedField.Indexed",
         tags: ["core", "indexed"],
         nDocs: 100,
-        docs: function(i) {
-            return {x: {y: i}};
+        docs: function (i) {
+            return { x: { y: i } };
         },
-        indexes: [{"x.y": 1}],
+        indexes: [{ "x.y": 1 }],
         op: {
             op: "find",
-            query: {"x.y": {"#RAND_INT_PLUS_THREAD": [0, 100]}},
-            filter: {"x.y": 1, _id: 0}
+            query: { "x.y": { "#RAND_INT_PLUS_THREAD": [0, 100] } },
+            filter: { "x.y": 1, _id: 0 }
         }
     });
 
@@ -752,10 +1028,10 @@ if (typeof(tests) !== "object") {
     addTestCase({
         name: "LargeDocs",
         nDocs: 100,
-        docs: function(i) {
-            return {x: bigString};
+        docs: function (i) {
+            return { x: bigString };
         },
-        op: {op: "find", query: {}}
+        op: { op: "find", query: {} }
     });
 
     /**
@@ -770,15 +1046,15 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 1000,
-        docs: function(i) {
+        docs: function (i) {
             var nArrayElements = 10;
             var arrayRandom = [];
             for (var i = 0; i < nArrayElements; i++) {
                 arrayRandom.push(Random.randInt(10000));
             }
-            return {x: arrayRandom};
+            return { x: arrayRandom };
         },
-        op: {op: "find", query:{}, sort: {x: 1}}
+        op: { op: "find", query: {}, sort: { x: 1 } }
     });
 
     /**
@@ -793,15 +1069,15 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 1000,
-        docs: function(i) {
+        docs: function (i) {
             var nArrayElements = 10;
             var arrayRandom = [];
             for (var i = 0; i < nArrayElements; i++) {
-                arrayRandom.push({x:Random.randInt(10000)});
+                arrayRandom.push({ x: Random.randInt(10000) });
             }
-            return {arr: arrayRandom};
+            return { arr: arrayRandom };
         },
-        op: {op: "find", query: {}, sort: {"arr.x": 1}}
+        op: { op: "find", query: {}, sort: { "arr.x": 1 } }
     });
 
     /**
@@ -816,11 +1092,11 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 1000,
-        docs: function(i) {
-            return {x: Random.randInt(10000)};
+        docs: function (i) {
+            return { x: Random.randInt(10000) };
         },
-        indexes: [{x: 1}],
-        op: {op: "find", query: {}, sort: {x: 1}, filter: {x: 1, _id: 0}}
+        indexes: [{ x: 1 }],
+        op: { op: "find", query: {}, sort: { x: 1 }, filter: { x: 1, _id: 0 } }
     });
 
     /**
@@ -836,15 +1112,15 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 1000,
-        docs: function(i) {
-            return {x: Random.randInt(10000), y: Random.randInt(10000)};
+        docs: function (i) {
+            return { x: Random.randInt(10000), y: Random.randInt(10000) };
         },
-        indexes: [{x: 1,  y: 1}],
+        indexes: [{ x: 1, y: 1 }],
         op: {
             op: "find",
-            query: {x: {$gt: 0}, y: {$gt: 0}},
-            filter: {x: 1, y:1, _id: 0},
-            sort: {y: 1},
+            query: { x: { $gt: 0 }, y: { $gt: 0 } },
+            filter: { x: 1, y: 1, _id: 0 },
+            sort: { y: 1 },
         }
     });
 
@@ -862,14 +1138,14 @@ if (typeof(tests) !== "object") {
         // sorting when running in read command mode.
         createViewsPassthrough: false,
         nDocs: 1000,
-        docs: function(i) {
-            return {x: Random.randInt(10000), y: Random.randInt(10000)};
+        docs: function (i) {
+            return { x: Random.randInt(10000), y: Random.randInt(10000) };
         },
-        indexes: [{x: 1, y: 1}],
+        indexes: [{ x: 1, y: 1 }],
         op: {
             op: "find",
-            query: {x: {$gt: 0}, y: {$gt: 0}},
-            sort: {y: 1},
+            query: { x: { $gt: 0 }, y: { $gt: 0 } },
+            sort: { y: 1 },
         }
     });
 }());
